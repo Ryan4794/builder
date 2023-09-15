@@ -1,0 +1,9 @@
+{
+    "token": "YOUR_DEFAULT_TOKEN_HERE",
+    "password_req": true,
+    "guild_id": 1234567891234567891,
+    "owner_id": [
+        1234567891234567891,
+        1234567891234567891
+    ]
+}
